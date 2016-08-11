@@ -97,7 +97,7 @@ class Derivation(object):
             return Derivation.parse_derivation(source)
 
 def main():
-    """Main entry point. Parse a derivation and print as JSON."""
+    """Main entry point. Parse a derivation and print its inputs."""
     nix_args = sys.argv[1:]
     deriv_paths = (check_output(" ".join(["nix-instantiate"] + nix_args),
                                 shell=True)
