@@ -1,7 +1,8 @@
+import argparse
 import ast
 import json
 import re
-from subprocess import check_output, PIPE
+from subprocess import check_output, PIPE, Popen
 import sys
 
 
@@ -96,12 +97,36 @@ class Derivation(object):
             source = f.read()
             return Derivation.parse_derivation(source)
 
+def get_args():
+    """Build argument parser and parse args."""
+    parser = argparse.ArgumentParser(prog="parse-deriv")
+    subparsers = parser.add_subparsers(title="Command", dest="command")
+    subparsers.required = True
+    p_build = subparsers.add_parser("build",
+                                    help="Build and parse derivations.")
+    p_build.add_argument("--args", help="Arguments to nix-instantiate.")
+    p_parse = subparsers.add_parser("parse",
+                                    help="Parse derivation paths.")
+    p_parse.add_argument("derivation_paths", nargs="+",
+                         help="Paths to the derivation files.")
+    for subparser in (p_build, p_parse):
+        subparser.add_argument("-A", "--attribute", default=None,
+                               help="Show this attribute of the derivations.")
+    return parser.parse_args()
+
 def main():
     """Main entry point. Parse a derivation and print its inputs."""
-    nix_args = sys.argv[1:]
-    deriv_paths = (check_output(" ".join(["nix-instantiate"] + nix_args),
-                                shell=True)
-                  .decode("utf-8").strip().split("\n"))
+    args = get_args()
+    if args.command == "build":
+        proc = Popen("nix-instantiate {}".format(args.args),
+                     shell=True, stderr=PIPE, stdout=PIPE)
+        out, err = proc.communicate()
+        if proc.returncode != 0:
+            sys.exit(err)
+        else:
+            deriv_paths = out.decode("utf-8").strip().split("\n")
+    elif args.command == "parse":
+        deriv_paths = args.derivation_paths
     derivations = {}
     for deriv_path in deriv_paths:
         # nix-instantiate might produce a path with a !<output> at the
@@ -114,11 +139,26 @@ def main():
             with open(deriv_path) as f:
                 source = f.read()
             derivations[deriv_path] = Derivation.parse_derivation(source)
-    paths = set()
-    for d in derivations.values():
-        paths = paths.union(d.input_paths())
-    for path in paths:
-        print(path)
+    if len(derivations) == 1:
+        derivation = list(derivations.values())[0]
+        if args.attribute is not None:
+            to_show = getattr(derivation, args.attribute)
+        else:
+            to_show = vars(derivation)
+    else:
+        if args.attribute is not None:
+            to_show = {path: getattr(derivation, args.attribute)
+                       for path, derivation in derivations.items()}
+        else:
+            to_show = {path: vars(derivation)
+                       for path, derivation in derivations.items()}
+    print(json.dumps(to_show, indent=2))
+
+    # paths = set()
+    # for d in derivations.values():
+    #     paths = paths.union(d.input_paths())
+    # for path in paths:
+    #     print(path)
 
 if __name__ == "__main__":
     main()
