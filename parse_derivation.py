@@ -1,10 +1,6 @@
-import argparse
+#!/usr/bin/env python3
 import ast
-import json
-import re
-from subprocess import check_output, PIPE, Popen
 import sys
-
 
 class Derivation(object):
     """A Python representation of a derivation."""
@@ -94,71 +90,28 @@ class Derivation(object):
         :rtype: :py:class:`Derivation`
         """
         with open(derivation_path, "rb") as f:
-            source = f.read()
-            return Derivation.parse_derivation(source)
-
-def get_args():
-    """Build argument parser and parse args."""
-    parser = argparse.ArgumentParser(prog="parse-deriv")
-    subparsers = parser.add_subparsers(title="Command", dest="command")
-    subparsers.required = True
-    p_build = subparsers.add_parser("build",
-                                    help="Build and parse derivations.")
-    p_build.add_argument("--args", help="Arguments to nix-instantiate.")
-    p_parse = subparsers.add_parser("parse",
-                                    help="Parse derivation paths.")
-    p_parse.add_argument("derivation_paths", nargs="+",
-                         help="Paths to the derivation files.")
-    for subparser in (p_build, p_parse):
-        subparser.add_argument("-A", "--attribute", default=None,
-                               help="Show this attribute of the derivations.")
-    return parser.parse_args()
+            source = f.read().decode("utf-8")
+            try:
+                return Derivation.parse_derivation(source)
+            except Exception as e:
+                raise ValueError("Couldn't parse derivation at path {}: {}"
+                                 .format(derivation_path, repr(e)))
 
 def main():
-    """Main entry point. Parse a derivation and print its inputs."""
-    args = get_args()
-    if args.command == "build":
-        proc = Popen("nix-instantiate {}".format(args.args),
-                     shell=True, stderr=PIPE, stdout=PIPE)
-        out, err = proc.communicate()
-        if proc.returncode != 0:
-            sys.exit(err)
-        else:
-            deriv_paths = out.decode("utf-8").strip().split("\n")
-    elif args.command == "parse":
-        deriv_paths = args.derivation_paths
-    derivations = {}
-    for deriv_path in deriv_paths:
-        # nix-instantiate might produce a path with a !<output> at the
-        # end, to indicate that it's a particular output of that
-        # expression. For now just trim this off.
-        match = re.match(r"^(.*?\.drv)!\w+$", deriv_path)
-        if match is not None:
-            deriv_path = match.group(1)
-        if deriv_path not in derivations:
-            with open(deriv_path) as f:
-                source = f.read()
-            derivations[deriv_path] = Derivation.parse_derivation(source)
-    if len(derivations) == 1:
-        derivation = list(derivations.values())[0]
-        if args.attribute is not None:
-            to_show = getattr(derivation, args.attribute)
-        else:
-            to_show = vars(derivation)
+    """Main entry point. Parse derivations and print their inputs."""
+    if len(sys.argv) <= 1 and not sys.stdin.isatty():
+        deriv_paths = sys.stdin.read().split()
+    elif len(sys.argv) > 1:
+        deriv_paths = sys.argv[1:]
     else:
-        if args.attribute is not None:
-            to_show = {path: getattr(derivation, args.attribute)
-                       for path, derivation in derivations.items()}
-        else:
-            to_show = {path: vars(derivation)
-                       for path, derivation in derivations.items()}
-    print(json.dumps(to_show, indent=2))
-
-    # paths = set()
-    # for d in derivations.values():
-    #     paths = paths.union(d.input_paths())
-    # for path in paths:
-    #     print(path)
+        sys.exit("You must give me some paths.")
+    all_paths = set()
+    for path in deriv_paths:
+        deriv = Derivation.parse_derivation_file(path)
+        for input_path in deriv.input_paths():
+            if input_path not in all_paths:
+                print(input_path)
+                all_paths.add(input_path)
 
 if __name__ == "__main__":
     main()

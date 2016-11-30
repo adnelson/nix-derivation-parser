@@ -1,10 +1,10 @@
 {
-  nsnix ? import <nsnix> {}
+  pkgs ? import <nixpkgs> {}
 }:
 
-import ./getinputs.nix {
-  inherit (nsnix.external) pkgs;
-  includeDependenciesOf = [
-    nsnix.external.python2.ipython
-  ];
+
+pkgs.python3Packages.buildPythonPackage {
+  name = "nix-derivation-parser";
+  propagatedBuildInputs = [pkgs.nix.out];
+  src = ./.;
 }
