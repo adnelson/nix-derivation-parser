@@ -24,7 +24,7 @@ def get_args():
     p_show.add_argument("-A", "--attribute", help="Attribute to show.")
     p_show.add_argument("-e", "--env-var",
                         help="Environmant variable to show.")
-    p_show.set_defaults(format="json")
+    p_show.set_defaults(format="string")
 
     # 'diff' command
     p_diff = subparsers.add_parser("diff", help="Diff two derivations.")

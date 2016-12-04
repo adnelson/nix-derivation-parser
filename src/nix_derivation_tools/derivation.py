@@ -43,6 +43,27 @@ class Derivation(object):
         self.builder_args = builder_args
         self.environment = environment
 
+        # Built lazily.
+        self._input_paths = None
+        self._input_derivation_paths = None
+        self._output_names_to_paths = None
+        self._as_dict = None
+
+    @property
+    def output_names_to_paths(self):
+        """A dictionary mapping output names to their paths."""
+        if self._output_names_to_paths is None:
+            result = {}
+            for name, _path in self.outputs.items():
+                if isinstance(_path, str):
+                    result[name] = _path
+                else:
+                    # The path is actually a tuple combining the path with
+                    # some hash data. Just take the path part.
+                    result[name] = _path[0]
+            self._output_names_to_paths = result
+        return self._output_names_to_paths
+
     @property
     def name(self):
         """Get the name of the derivation by reading its environment.
@@ -52,18 +73,33 @@ class Derivation(object):
         return self.environment["name"]
 
     @property
+    def input_derivation_paths(self):
+        """Set of all store paths needed to build this derivation,
+        that are themselves the result of derivations.
+
+        :return: A set of paths.
+        :rtype: ``set`` of ``str``
+        """
+        if self._input_derivation_paths is None:
+            paths = set()
+            for deriv_path, outputs in self.input_derivations.items():
+                input_deriv = Derivation.parse_derivation_file(deriv_path)
+                for output in outputs:
+                    paths.add(input_deriv.output_names_to_paths[output])
+            self._input_derivation_paths = paths
+        return self._input_derivation_paths
+
+    @property
     def input_paths(self):
         """Set of all store paths needed to build the derivation.
 
         :return: A set of paths.
         :rtype: ``set`` of ``str``
         """
-        paths = set(self.input_files)
-        for deriv_path, outputs in self.input_derivations.items():
-            input_deriv = Derivation.parse_derivation_file(deriv_path)
-            for output in outputs:
-                paths.add(input_deriv.outputs[output])
-        return paths
+        if self._input_paths is None:
+            paths = set(self.input_files) | self.input_derivation_paths
+            self._input_paths = paths
+        return self._input_paths
 
     @property
     def output_names(self):
@@ -76,15 +112,27 @@ class Derivation(object):
 
     def __eq__(self, other):
         """Test if one derivation is equal to another."""
-        return vars(self) == vars(other)
+        return self.as_dict == other.as_dict
 
-    def to_dict(self):
+    @property
+    def as_dict(self):
         """Convert to a JSON-compatible dictionary."""
-        res = vars(self)
-        for key, val in res.items():
-            if isinstance(val, (set, tuple)):
-                res[key] = list(val)
-        return res
+        if self._as_dict is None:
+            _items = vars(self).items()
+            res = {k: v for k, v in _items if not k.startswith("_")}
+            for key, val in res.items():
+                if isinstance(val, set):
+                    res[key] = list(sorted(val))
+                elif isinstance(val, tuple):
+                    res[key] = list(val)
+            self._as_dict = res
+        return self._as_dict
+
+    def needed_to_build(self, output):
+        """Return a set of paths needed to build this output.
+        """
+
+
 
     def diff(self, other):
         """Get a naive diff between two derivations, just comparing
@@ -105,23 +153,33 @@ class Derivation(object):
         :type attribute: ``str`` or ``NoneType``
         :param env_var: If given, only show that environment variable.
         :type env_var: ``str`` or ``NoneType``
-        :param format: The output format. Valid options are 'json' and 'yaml'.
+        :param format: The output format. Valid options are 'string',
+                       'json' and 'yaml'. 'string' is limited in that it can
+                       only show strings and lists of strings.
         :type format: ``str``
         :param pretty: Pretty-print.
         :type pretty: ``bool``
 
         :rtype: ``str``
         """
-        selfdict = self.to_dict()
         if attribute is None and env_var is None:
-            to_print = selfdict
+            to_print = self.as_dict
         elif attribute is not None:
-            to_print = selfdict[attribute]
+            to_print = getattr(self, attribute)
+            if isinstance(to_print, set):
+                to_print = list(sorted(to_print))
         else:
             to_print = self.environment[env_var]
-        if isinstance(to_print, str) and pretty is True:
-            return to_print
-        if format == "json":
+        if format == "string":
+            if isinstance(to_print, str):
+                return to_print
+            elif isinstance(to_print, list) and \
+                   all(isinstance(x, str) for x in to_print):
+                return "\n".join(to_print)
+            else:
+                raise TypeError("Can't convert {} to a string (try --json "
+                                "or --yaml).".format(type(to_print)))
+        elif format == "json":
             if pretty is True:
                 return json.dumps(to_print, indent=2)
             else:
