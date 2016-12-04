@@ -14,6 +14,29 @@ let
     };
     propagatedBuildInputs = [pythonPackages.pyyaml];
   };
+
+  servenix = pythonPackages.buildPythonPackage rec {
+    name = "servenix-${version}";
+    version = "0.4.2";
+    src = pkgs.fetchurl {
+      url = "https://github.com/adnelson/servenix/archive/0.4.2.tar.gz";
+      sha256 = "0skl0kiwkx2fzimad7861ib3l74nhaawfnqr01mfni39c5hvwzyi";
+    };
+    propagatedBuildInputs = [
+      pkgs.coreutils
+      pkgs.gzip
+      pkgs.nix.out
+      pkgs.pv
+      pkgs.which
+      pythonPackages.flask
+      pythonPackages.requests2
+      pythonPackages.ipdb
+      pythonPackages.six
+    ];
+    makeWrapperArgs = [
+      "--set NIX_BIN_PATH ${pkgs.lib.makeBinPath [pkgs.nix.out]}"
+    ];
+  };
 in
 
 pythonPackages.buildPythonPackage {
@@ -21,6 +44,9 @@ pythonPackages.buildPythonPackage {
   propagatedBuildInputs = [
     pythonPackages.datadiff
     pythonPackages.pyyaml
+    pythonPackages.requests2
     rtyaml
+    servenix
+    pkgs.nix.out
   ];
 }

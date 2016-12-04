@@ -2,6 +2,10 @@
 
 import argparse
 import sys
+import json
+import requests
+
+from servenix.client.sendnix import StoreObjectSender
 
 from nix_derivation_tools.derivation import Derivation
 from nix_derivation_tools.derivation_diff import diff_derivations
@@ -41,6 +45,10 @@ def get_args():
                                      help="Show paths needed to build a derivation.")
     p_preview.add_argument("derivation_paths", nargs="+",
                           help="Paths to derivations.")
+    p_preview.add_argument("-c", "--binary-cache",
+                           help="URL of a binary cache to query for paths.")
+    p_preview.add_argument("--show-existing", action="store_true",
+                           default=False, help="Show paths already existing.")
 
     return p_root.parse_args()
 
@@ -86,19 +94,52 @@ def main():
             else:
                 outputs = None
             derivs.append((Derivation.parse_derivation_file(path), outputs))
-        needed, existing = {}, {}
+        needed, existing, on_server = {}, {}, {}
         for deriv, outputs in derivs:
             deriv.needed_to_build(outputs=outputs,
                                   derivs_needed=needed,
                                   derivs_existing=existing)
-        if len(needed) > 0:
-            print("These derivation outputs need to be built:")
+        if len(needed) > 0 and args.binary_cache is not None:
+            sender = StoreObjectSender(endpoint=args.binary_cache)
+            # Query the server for missing paths. Start by trying a
+            # multi-query because it's faster; if the server doesn't
+            # implement that behavior then try individual queries.
+            paths_to_ask = []
+            # Make a dictionary mapping paths back to the
+            # derivations/outputs they came from.
+            path_mapping = {}
             for deriv, outs in needed.items():
-                print("  {} -> {}".format(deriv.path, ", ".join(outs)))
-        if len(existing) > 0:
-            print("These derivation outputs already exist:")
-            for deriv, outs in existing.items():
-                print("  {} -> {}".format(deriv.path, ", ".join(outs)))
+                for out in outs:
+                    path = deriv.output_mapping[out]
+                    paths_to_ask.append(path)
+                    path_mapping[path] = (deriv, out)
+            url = "{}/query-paths".format(args.binary_cache)
+            data = json.dumps(paths_to_ask)
+            headers = {"Content-Type": "application/json"}
+            auth = sender._get_auth()
+            resp = requests.get(url, headers=headers, data=data, auth=auth)
+            resp.raise_for_status()
+            for path, is_on_server in resp.json().items():
+                if is_on_server is False:
+                    continue
+                deriv, out_name = path_mapping[path]
+                # First, remove these from the `needed` set, because
+                # we can fetch them from the server.
+                needed[deriv].remove(out_name)
+                if len(needed[deriv]) == 0:
+                    del needed[deriv]
+                if deriv not in on_server:
+                    on_server[deriv] = set()
+                on_server[deriv].add(out_name)
+        def print_set(action, s):
+            if len(s) > 0:
+                print("These derivation outputs {}:".format(action))
+                for deriv, outs in s.items():
+                    print("  {} -> {}".format(deriv.path, ", ".join(outs)))
+        print_set("need to be built", needed)
+        print_set("will be fetched", on_server)
+        if args.show_existing:
+            print_set("already exist", existing)
     else:
         sys.exit("Command {} not implemented".format(repr(args.command)))
 
