@@ -1,6 +1,8 @@
 import ast
 import os
+from os.path import exists
 import json
+import sys
 
 import datadiff
 import yaml
@@ -9,12 +11,17 @@ import rtyaml
 
 class Derivation(object):
     """A Python representation of a derivation."""
-    def __init__(self, path, outputs, input_derivations, input_files, system,
-                 builder, builder_args, environment):
+    # Cache of parsed derivations, to avoid duplicat parsing.
+    CACHE = {}
+
+    def __init__(self, path, raw, outputs, input_derivations,
+                 input_files, system, builder, builder_args, environment):
         """Initializer.
 
         :param path: The path to this derivation file.
         :type path: ``str``
+        :param raw: Raw nix derivation.
+        :type raw: ``str``
         :param outputs: The outputs this derivation will produce. Keys are
             output names, and values are EITHER nix store paths, OR
             nix store paths plus some output hash information.
@@ -43,16 +50,36 @@ class Derivation(object):
         self.builder_args = builder_args
         self.environment = environment
 
+        # Hidden since they're not considered part of a nix derivation,
+        # but accessible via property.
+        self._raw = raw
+        self._path = path
+
         # Built lazily.
         self._input_paths = None
         self._input_derivation_paths = None
-        self._output_names_to_paths = None
+        self._output_mapping = None
         self._as_dict = None
 
     @property
-    def output_names_to_paths(self):
+    def path(self):
+        """Path to the derivation file."""
+        return self._path
+
+    @property
+    def raw(self):
+        """The raw derivation string."""
+        return self._raw
+
+    @property
+    def default_output(self):
+        """Name of the output that is built by default (usually 'out')."""
+        return self.environment["outputs"].split()[0]
+
+    @property
+    def output_mapping(self):
         """A dictionary mapping output names to their paths."""
-        if self._output_names_to_paths is None:
+        if self._output_mapping is None:
             result = {}
             for name, _path in self.outputs.items():
                 if isinstance(_path, str):
@@ -61,14 +88,14 @@ class Derivation(object):
                     # The path is actually a tuple combining the path with
                     # some hash data. Just take the path part.
                     result[name] = _path[0]
-            self._output_names_to_paths = result
-        return self._output_names_to_paths
+            self._output_mapping = result
+        return self._output_mapping
 
     @property
     def name(self):
         """Get the name of the derivation by reading its environment.
 
-        `name` is required so this should be safe.
+        `name` is a required attribute of derivations, so this should be safe.
         """
         return self.environment["name"]
 
@@ -85,7 +112,7 @@ class Derivation(object):
             for deriv_path, outputs in self.input_derivations.items():
                 input_deriv = Derivation.parse_derivation_file(deriv_path)
                 for output in outputs:
-                    paths.add(input_deriv.output_names_to_paths[output])
+                    paths.add(input_deriv.output_mapping[output])
             self._input_derivation_paths = paths
         return self._input_derivation_paths
 
@@ -110,16 +137,12 @@ class Derivation(object):
         """
         return set(self.outputs.keys())
 
-    def __eq__(self, other):
-        """Test if one derivation is equal to another."""
-        return self.as_dict == other.as_dict
-
     @property
     def as_dict(self):
         """Convert to a JSON-compatible dictionary."""
         if self._as_dict is None:
-            _items = vars(self).items()
-            res = {k: v for k, v in _items if not k.startswith("_")}
+            items = vars(self).items()
+            res = {k: v for k, v in items if not k.startswith("_")}
             for key, val in res.items():
                 if isinstance(val, set):
                     res[key] = list(sorted(val))
@@ -128,11 +151,77 @@ class Derivation(object):
             self._as_dict = res
         return self._as_dict
 
-    def needed_to_build(self, output):
-        """Return a set of paths needed to build this output.
+    def needed_to_build(self, outputs=None, derivs_needed=None,
+                        derivs_existing=None):
+        """Return a set of derivations needed to build this output.
+
+        If the outputs exists already, returns an empty set. Otherwise,
+        the derivation itself is added. In addition, we look at all of
+        its input paths that come from derivations. Whichever have
+        output paths which don't exist already will be recurred on.
+
+        :param outputs: Outputs of the derivation needed to build. If not
+                        specified, all outputs are built.
+        :type outputs: ``list`` of ``str``
+        :param derivs_needed: Derivations and outputs known to be needed to
+                              be built.
+        :type derivs_needed: ``dict`` of ``Derivation`` to ``set`` of ``str``
+        :param derivs_existing: Derivations and outputs known to
+                                already exist.
+        :param derivs_existing: ``dict`` of ``Derivation`` to
+                                ``set`` of ``str``
+
+        :return: Two sets: one giving derivations needed to be built, and
+                 another giving derivations and outputs known to exist.
+        :rtype: (``dict`` of ``Derivation`` to ``set`` of ``str``,
+                 ``dict`` of ``Derivation`` to ``set`` of ``str``)
         """
+        outputs = outputs or self.outputs.keys()
+        if derivs_needed is None:
+            derivs_needed = {}
+        if derivs_existing is None:
+            derivs_existing = {}
+        # First check to see if we already have the information we need.
+        if self in derivs_needed:
+            for output in outputs:
+                derivs_needed[self].add(output)
+            return (derivs_needed, derivs_existing)
+        elif self in derivs_existing:
+            if all(output in derivs_existing[self] for output in outputs):
+                return (derivs_needed, derivs_existing)
+        # So then, we don't know if we need to build this derivation.
+        # We can see by checking the outputs.
+        for output in outputs:
+            if exists(self.output_mapping[output]):
+                if self not in derivs_existing:
+                    derivs_existing[self] = set()
+                derivs_existing[self].add(output)
+            else:
+                if self not in derivs_needed:
+                    derivs_needed[self] = set()
+                derivs_needed[self].add(output)
+                # Even though we're doing this repeatedly, it will
+                # exit early on subsequent invocations, so it should
+                # be fast.
+                for path, outs in self.input_derivations.items():
+                    deriv = Derivation.parse_derivation_file(path)
+                    deriv.needed_to_build(outputs=outs,
+                                          derivs_needed=derivs_needed,
+                                          derivs_existing=derivs_existing)
+        return (derivs_needed, derivs_existing)
 
+    def __eq__(self, other):
+        """Test if one derivation is equal to another."""
+        if isinstance(other, str):
+            other = Derivation.parse_derivation_file(other)
+        return self.as_dict == other.as_dict
 
+    def __hash__(self):
+        """Use the derivation's path as a hash."""
+        return hash(self.path)
+
+    def __repr__(self):
+        return "Derivation({})".format(repr(self.path))
 
     def diff(self, other):
         """Get a naive diff between two derivations, just comparing
@@ -163,7 +252,7 @@ class Derivation(object):
         :rtype: ``str``
         """
         if attribute is None and env_var is None:
-            to_print = self.as_dict
+            to_print = self.raw if format == "string" else self.as_dict
         elif attribute is not None:
             to_print = getattr(self, attribute)
             if isinstance(to_print, set):
@@ -181,9 +270,9 @@ class Derivation(object):
                                 "or --yaml).".format(type(to_print)))
         elif format == "json":
             if pretty is True:
-                return json.dumps(to_print, indent=2)
+                return json.dumps(to_print, indent=2, sort_keys=True)
             else:
-                return json.dumps(to_print)
+                return json.dumps(to_print, sort_keys=True)
         elif format == "yaml":
             if pretty is True:
                 return rtyaml.dump(to_print)
@@ -212,8 +301,9 @@ class Derivation(object):
         # operation because the derivation will not contain any
         # function calls, or anything which isn't a valid python literal.
         derivation_list =  ast.literal_eval(derivation_string)
+        output_list= derivation_list[0]
         outputs = {name: path if hashtype == "" else (path, hashtype, hash_)
-                   for name, path, hashtype, hash_ in derivation_list[0]}
+                   for name, path, hashtype, hash_ in output_list}
         input_derivations = dict(derivation_list[1])
         input_files = set(derivation_list[2])
         system = derivation_list[3]
@@ -221,9 +311,14 @@ class Derivation(object):
         builder_args = derivation_list[5]
         environment = dict(derivation_list[6])
         return Derivation(path=derivation_path,
-            outputs=outputs, input_derivations=input_derivations,
-            input_files=input_files, system=system, builder=builder,
-            builder_args=builder_args, environment=environment)
+                          raw=derivation_string,
+                          outputs=outputs,
+                          input_derivations=input_derivations,
+                          input_files=input_files,
+                          system=system,
+                          builder=builder,
+                          builder_args=builder_args,
+                          environment=environment)
 
     @staticmethod
     def parse_derivation_file(derivation_path):
@@ -239,10 +334,14 @@ class Derivation(object):
         if not os.path.isabs(derivation_path) and "NIX_STORE" in os.environ:
             derivation_path = os.path.join(os.environ["NIX_STORE"],
                                            derivation_path)
+        if derivation_path in Derivation.CACHE:
+            return Derivation.CACHE[derivation_path]
         with open(derivation_path, "rb") as f:
             source = f.read().decode("utf-8")
             try:
-                return Derivation.parse_derivation(source, derivation_path)
+                deriv = Derivation.parse_derivation(source, derivation_path)
+                Derivation.CACHE[derivation_path] = deriv
+                return deriv
             except Exception as e:
                 raise ValueError("Couldn't parse derivation at path {}: {}"
                                  .format(derivation_path, repr(e)))

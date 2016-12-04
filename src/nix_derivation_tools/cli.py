@@ -36,13 +36,22 @@ def get_args():
     p_sdiff.add_argument("first", help="Path to the first derivation.")
     p_sdiff.add_argument("second", help="Path to the second derivation.")
 
+    # 'preview' command
+    p_preview = subparsers.add_parser("preview",
+                                     help="Show paths needed to build a derivation.")
+    p_preview.add_argument("derivation_paths", nargs="+",
+                          help="Paths to derivations.")
+
     return p_root.parse_args()
 
 def main():
     """Main entry point."""
     args = get_args()
     if args.command == "show":
-        deriv = Derivation.parse_derivation_file(args.derivation_path)
+        path = args.derivation_path
+        if "!" in path:
+            path = path.split("!")[0]
+        deriv = Derivation.parse_derivation_file(path)
         print(deriv.display(
             attribute=args.attribute,
             env_var=args.env_var,
@@ -65,8 +74,33 @@ def main():
             print(left)
             print("Right:")
             print(right)
+    elif args.command == "preview":
+        derivs = []
+        for path in args.derivation_paths:
+            if "!" in path:
+                # This syntax allows the user to specify particular
+                # output(s) of a derivation to check, rather than just
+                # the derivation itself.
+                path, out = path.split("!")
+                outputs = out.split(",")
+            else:
+                outputs = None
+            derivs.append((Derivation.parse_derivation_file(path), outputs))
+        needed, existing = {}, {}
+        for deriv, outputs in derivs:
+            deriv.needed_to_build(outputs=outputs,
+                                  derivs_needed=needed,
+                                  derivs_existing=existing)
+        if len(needed) > 0:
+            print("These derivation outputs need to be built:")
+            for deriv, outs in needed.items():
+                print("  {} -> {}".format(deriv.path, ", ".join(outs)))
+        if len(existing) > 0:
+            print("These derivation outputs already exist:")
+            for deriv, outs in existing.items():
+                print("  {} -> {}".format(deriv.path, ", ".join(outs)))
     else:
-        sys.exit("Command {} not implemented".format(args.command))
+        sys.exit("Command {} not implemented".format(repr(args.command)))
 
 if __name__ == "__main__":
     main()
