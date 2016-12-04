@@ -6,7 +6,7 @@ import sys
 
 from nix_derivation_tools.derivation import Derivation
 from nix_derivation_tools.derivation_diff import diff_derivations
-from nix_derivation_tools.preview import preview_build
+from nix_derivation_tools.preview import print_preview
 
 def get_args():
     """Parse command-line arguments."""
@@ -88,7 +88,7 @@ def main():
             paths = (p.strip() for p in sys.stdin)
         else:
             sys.exit("No path arguments given")
-        preview_build(paths, binary_cache=args.binary_cache,
+        print_preview(paths, binary_cache=args.binary_cache,
                       show_existing=args.show_existing)
     else:
         sys.exit("Command {} not implemented".format(repr(args.command)))
