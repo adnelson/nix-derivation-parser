@@ -1,6 +1,5 @@
 import ast
 import os
-from os.path import exists
 import json
 import sys
 
@@ -150,65 +149,6 @@ class Derivation(object):
                     res[key] = list(val)
             self._as_dict = res
         return self._as_dict
-
-    def needed_to_build(self, outputs=None, derivs_needed=None,
-                        derivs_existing=None):
-        """Return a set of derivations needed to build this output.
-
-        If the outputs exists already, returns an empty set. Otherwise,
-        the derivation itself is added. In addition, we look at all of
-        its input paths that come from derivations. Whichever have
-        output paths which don't exist already will be recurred on.
-
-        :param outputs: Outputs of the derivation needed to build. If not
-                        specified, all outputs are built.
-        :type outputs: ``list`` of ``str``
-        :param derivs_needed: Derivations and outputs known to be needed to
-                              be built.
-        :type derivs_needed: ``dict`` of ``Derivation`` to ``set`` of ``str``
-        :param derivs_existing: Derivations and outputs known to
-                                already exist.
-        :param derivs_existing: ``dict`` of ``Derivation`` to
-                                ``set`` of ``str``
-
-        :return: Two sets: one giving derivations needed to be built, and
-                 another giving derivations and outputs known to exist.
-        :rtype: (``dict`` of ``Derivation`` to ``set`` of ``str``,
-                 ``dict`` of ``Derivation`` to ``set`` of ``str``)
-        """
-        outputs = outputs or self.outputs.keys()
-        if derivs_needed is None:
-            derivs_needed = {}
-        if derivs_existing is None:
-            derivs_existing = {}
-        # First check to see if we already have the information we need.
-        if self in derivs_needed:
-            for output in outputs:
-                derivs_needed[self].add(output)
-            return (derivs_needed, derivs_existing)
-        elif self in derivs_existing:
-            if all(output in derivs_existing[self] for output in outputs):
-                return (derivs_needed, derivs_existing)
-        # So then, we don't know if we need to build this derivation.
-        # We can see by checking the outputs.
-        for output in outputs:
-            if exists(self.output_mapping[output]):
-                if self not in derivs_existing:
-                    derivs_existing[self] = set()
-                derivs_existing[self].add(output)
-            else:
-                if self not in derivs_needed:
-                    derivs_needed[self] = set()
-                derivs_needed[self].add(output)
-                # Even though we're doing this repeatedly, it will
-                # exit early on subsequent invocations, so it should
-                # be fast.
-                for path, outs in self.input_derivations.items():
-                    deriv = Derivation.parse_derivation_file(path)
-                    deriv.needed_to_build(outputs=outs,
-                                          derivs_needed=derivs_needed,
-                                          derivs_existing=derivs_existing)
-        return (derivs_needed, derivs_existing)
 
     def __eq__(self, other):
         """Test if one derivation is equal to another."""
