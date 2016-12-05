@@ -18,10 +18,11 @@ let
   servenix = pythonPackages.buildPythonPackage rec {
     name = "servenix-${version}";
     version = "0.4.2";
-    src = pkgs.fetchurl {
-      url = "https://github.com/adnelson/servenix/archive/0.4.2.tar.gz";
-      sha256 = "0skl0kiwkx2fzimad7861ib3l74nhaawfnqr01mfni39c5hvwzyi";
-    };
+    src = ../servenix;
+    # pkgs.fetchurl {
+    #   url = "https://github.com/adnelson/servenix/archive/0.4.2.tar.gz";
+    #   sha256 = "0skl0kiwkx2fzimad7861ib3l74nhaawfnqr01mfni39c5hvwzyi";
+    # };
     propagatedBuildInputs = [
       pkgs.coreutils
       pkgs.gzip

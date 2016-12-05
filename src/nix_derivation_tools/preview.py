@@ -58,37 +58,17 @@ def preview_build(paths, binary_cache=None):
                 path = deriv.output_mapping[out]
                 paths_to_ask.append(path)
                 path_mapping[path] = (deriv, out)
-        url = "{}/query-paths".format(binary_cache)
-        data = json.dumps(paths_to_ask)
-        headers = {"Content-Type": "application/json"}
-        auth = sender._get_auth()
-        try:
-            resp = requests.get(url, headers=headers, data=data, auth=auth)
-            resp.raise_for_status()
-            # Grab all of the paths which the server said it had.
-            paths_on_server = (path for path, on_server in resp.json().items()
-                               if on_server is True)
-        except requests.HTTPError as err:
-            print("Endpoint {} does not support the /query-paths route. "
-                  "Querying paths individually.".format(binary_cache),
-                  file=sys.stderr)
-            if err.response.status_code != 404:
-                raise
-            paths_on_server = []
-            for path in paths_to_ask:
-                print("Querying for path {}".format(path), file=sys.stderr)
-                prefix = path.split("-")[0]
-                url = "{}/{}.narinfo".format(binary_cache, prefix)
-                resp = requests.get(url, auth=auth)
-                if resp.status_code == 200:
-                    paths_on_server.append(path)
-        for path in paths_on_server:
+        query_result = sender.query_paths(paths_to_ask)
+        for path, is_on_server in query_result.items():
+            if is_on_server is False:
+                continue
             deriv, out_name = path_mapping[path]
             # First, remove these from the `needed` set, because
             # we can fetch them from the server.
             needed[deriv].remove(out_name)
             if len(needed[deriv]) == 0:
                 del needed[deriv]
+            # Then add them to the `on_server` set.
             if deriv not in on_server:
                 on_server[deriv] = set()
             on_server[deriv].add(out_name)
