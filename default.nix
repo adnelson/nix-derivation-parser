@@ -6,6 +6,7 @@
 }:
 
 let
+  local-servenix = builtins.getEnv "LOCAL_SERVENIX" != "";
   rtyaml = pythonPackages.buildPythonPackage {
     name = "rtyaml-0.0.3";
     src = pkgs.fetchurl {
@@ -15,10 +16,7 @@ let
     propagatedBuildInputs = [pythonPackages.pyyaml];
   };
 
-  servenix = if builtins.getEnv "LOCAL_SERVENIX" != "" then
-    import ../servenix {inherit pkgs pythonPackages;}
-  else
-    pythonPackages.buildPythonPackage rec {
+  servenix = pythonPackages.buildPythonPackage rec {
       name = "servenix-${version}";
       version = "0.4.3";
       src = pkgs.fetchurl {
@@ -52,4 +50,7 @@ pythonPackages.buildPythonPackage {
     servenix
     pkgs.nix.out
   ];
+  preShellHook = pkgs.lib.optionalString local-servenix ''
+    export PYTHONPATH=$PWD/../servenix/src:$PYTHONPATH
+  '';
 }

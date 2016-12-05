@@ -174,7 +174,7 @@ class Derivation(object):
         otherdict["outputs"] = list(sorted(otherdict["outputs"].keys()))
         return datadiff.diff(selfdict, otherdict)
 
-    def display(self, attribute=None, env_var=None,
+    def display(self, attribute=None, env_var=None, output=None,
                 format="json", pretty=False):
         """Return a string representation in the given format.
 
@@ -182,6 +182,8 @@ class Derivation(object):
         :type attribute: ``str`` or ``NoneType``
         :param env_var: If given, only show that environment variable.
         :type env_var: ``str`` or ``NoneType``
+        :param output: If given, show the output path of that output.
+        :type output: ``str``
         :param format: The output format. Valid options are 'string',
                        'json' and 'yaml'. 'string' is limited in that it can
                        only show strings and lists of strings.
@@ -191,12 +193,14 @@ class Derivation(object):
 
         :rtype: ``str``
         """
-        if attribute is None and env_var is None:
+        if attribute is None and env_var is None and output is None:
             to_print = self.raw if format == "string" else self.as_dict
         elif attribute is not None:
             to_print = getattr(self, attribute)
             if isinstance(to_print, set):
                 to_print = list(sorted(to_print))
+        elif output is not None:
+            to_print = self.output_mapping[output]
         else:
             to_print = self.environment[env_var]
         if format == "string":

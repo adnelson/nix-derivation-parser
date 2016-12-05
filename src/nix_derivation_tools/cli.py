@@ -26,6 +26,8 @@ def get_args():
     p_show.add_argument("-A", "--attribute", help="Attribute to show.")
     p_show.add_argument("-e", "--env-var",
                         help="Environmant variable to show.")
+    p_show.add_argument("-o", "--output",
+                        help="Show the path of the given output.")
     p_show.set_defaults(format="string")
 
     # 'diff' command
@@ -62,6 +64,7 @@ def main():
         print(deriv.display(
             attribute=args.attribute,
             env_var=args.env_var,
+            output=args.output,
             format=args.format,
             pretty=args.pretty))
     elif args.command == "diff":

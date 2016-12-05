@@ -195,6 +195,9 @@ def print_preview(paths, binary_cache=None, show_existing=False):
             print("These derivation outputs {}:".format(action))
             for deriv, outs in s.items():
                 print("  {} -> {}".format(deriv.path, ", ".join(outs)))
+        else:
+            print("No derivation outputs {}".format(action))
     needed, need_fetch = preview_build(paths, binary_cache)
+    print("Done!")
     print_set("need to be built", needed)
     print_set("will be fetched", need_fetch)
