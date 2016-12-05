@@ -15,29 +15,31 @@ let
     propagatedBuildInputs = [pythonPackages.pyyaml];
   };
 
-  servenix = pythonPackages.buildPythonPackage rec {
-    name = "servenix-${version}";
-    version = "0.4.2";
-    src = ../servenix;
-    # pkgs.fetchurl {
-    #   url = "https://github.com/adnelson/servenix/archive/0.4.2.tar.gz";
-    #   sha256 = "0skl0kiwkx2fzimad7861ib3l74nhaawfnqr01mfni39c5hvwzyi";
-    # };
-    propagatedBuildInputs = [
-      pkgs.coreutils
-      pkgs.gzip
-      pkgs.nix.out
-      pkgs.pv
-      pkgs.which
-      pythonPackages.flask
-      pythonPackages.requests2
-      pythonPackages.ipdb
-      pythonPackages.six
-    ];
-    makeWrapperArgs = [
-      "--set NIX_BIN_PATH ${pkgs.lib.makeBinPath [pkgs.nix.out]}"
-    ];
-  };
+  servenix = if builtins.getEnv "LOCAL_SERVENIX" != "" then
+    import ../servenix {inherit pkgs pythonPackages;}
+  else
+    pythonPackages.buildPythonPackage rec {
+      name = "servenix-${version}";
+      version = "0.4.3";
+      src = pkgs.fetchurl {
+        url = "https://github.com/adnelson/servenix/archive/${version}.tar.gz";
+        sha256 = "1gkd4iyj1kah6pq5m4w3jwba0yv6vk9y60sysi9wcaxzr5kl3y2g";
+      };
+      propagatedBuildInputs = [
+        pkgs.coreutils
+        pkgs.gzip
+        pkgs.nix.out
+        pkgs.pv
+        pkgs.which
+        pythonPackages.flask
+        pythonPackages.requests2
+        pythonPackages.ipdb
+        pythonPackages.six
+      ];
+      makeWrapperArgs = [
+        "--set NIX_BIN_PATH ${pkgs.lib.makeBinPath [pkgs.nix.out]}"
+      ];
+    };
 in
 
 pythonPackages.buildPythonPackage {
